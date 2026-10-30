@@ -1,10 +1,13 @@
 name: Deploy
 
-# main -> dev automatically. prod -> manual run (protected by the
-# "prod" GitHub environment: add required reviewers in repo settings).
+# push to main -> dev (everything).
+# Manual / agent:
+#   gh workflow run deploy.yml -f env=dev -f component=backend
+#   gh workflow run deploy.yml -f env=prod            # prod: main only, gated by the "prod" environment
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/**", "**/*.md", "mobile/**", ".claude/**"]
   workflow_dispatch:
     inputs:
       env:
@@ -12,6 +15,15 @@ on:
         type: choice
         options: [dev, prod]
         default: dev
+      component:
+        description: What to deploy
+        type: choice
+        options: [all, infra, backend, web]
+        default: all
+      replace_backend_instance:
+        description: Recreate the EC2 instance (needed after changing its user data / env file)
+        type: boolean
+        default: false
 
 permissions:
   id-token: write   # keyless AWS login via OIDC
@@ -22,14 +34,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { sparse-checkout: devops, sparse-checkout-cone-mode: true }
+      - id: check
+        run: |
+          if [ -f devops/project.env ]; then echo "configured=true" >> "$GITHUB_OUTPUT"
+          else echo "configured=false" >> "$GITHUB_OUTPUT"; echo "::notice::Not set up yet. Run the 'Setup (one-time)' workflow first."; fi
+
   deploy:
-    # Template repos are not bootstrapped yet: skip until devops/project.env exists.
-    if: hashFiles('devops/project.env') != ''
+    # Skip until setup.yml has connected the repo to AWS.
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.env || 'dev' }}
     env:
       ENV: ${{ inputs.env || 'dev' }}
+      COMPONENT: ${{ inputs.component || 'all' }}
     steps:
+      - name: Guard prod
+        if: env.ENV == 'prod' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::prod deploys only from main"
+          exit 1
+
       - uses: actions/checkout@v5
 
       - name: Load project settings
@@ -43,23 +75,37 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: "~1.13", terraform_wrapper: false }
       - uses: actions/setup-go@v6
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'backend'
         with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.mod }
       - uses: actions/setup-node@v5
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'web'
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
 
       - name: Infrastructure
-        run: devops/scripts/tf.sh "$ENV" apply -auto-approve
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'infra'
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.replace_backend_instance }}" = "true" ]; then
+            EXTRA="-replace=module.backend.aws_instance.app"
+          fi
+          devops/scripts/tf.sh "$ENV" apply -auto-approve $EXTRA
 
       - name: Backend
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'backend' || inputs.replace_backend_instance
         run: devops/scripts/deploy-backend.sh "$ENV"
 
       - name: Web
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'web'
         run: devops/scripts/deploy-web.sh "$ENV"
 
       - name: Summary
+        if: always()
         run: |
+          WEB="$(devops/scripts/tf.sh "$ENV" output -raw web_url 2>/dev/null || echo n/a)"
+          API="$(devops/scripts/tf.sh "$ENV" output -raw api_url 2>/dev/null || echo n/a)"
+          echo "DEPLOY_RESULT env=$ENV component=$COMPONENT web=$WEB api=$API sha=${GITHUB_SHA::7}"
           {
-            echo "### Deployed \`$ENV\`"
-            echo "- Web: $(devops/scripts/tf.sh "$ENV" output -raw web_url)"
-            echo "- API: $(devops/scripts/tf.sh "$ENV" output -raw api_url)"
+            echo "### \`$ENV\` / $COMPONENT @ ${GITHUB_SHA::7}"
+            echo "- Web: $WEB"
+            echo "- API: $API"
           } >> "$GITHUB_STEP_SUMMARY"

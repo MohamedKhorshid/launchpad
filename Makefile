@@ -1,13 +1,16 @@
-ENV ?= dev
-TF  := devops/scripts/tf.sh
+ENV       ?= dev
+COMPONENT ?= all
+RUN       := scripts/run-workflow.sh
 
-.PHONY: help setup install dev test lint plan infra deploy deploy-backend deploy-web destroy mobile
+.PHONY: help setup install dev test lint mobile deploy plan status mobile-build logs
 
 help: ## Show commands
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-16s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-14s\033[0m %s\n", $$1, $$2}'
 
-setup: ## First-time setup: name the project, connect AWS, optional first deploy
-	./scripts/bootstrap.sh
+# ---------- local development (no AWS) ----------
+
+setup: ## One-time: connect this repo to an AWS account (runs on GitHub Actions)
+	./scripts/setup.sh
 
 install: ## Install all dependencies
 	cd backend && go mod download
@@ -28,26 +31,24 @@ test: ## Run every test suite
 lint: ## Lint and format checks
 	$(MAKE) -C backend lint
 	cd web && npm run typecheck
-	terraform fmt -check -recursive devops/terraform
-
-plan: ## Preview infra changes: make plan ENV=dev
-	$(TF) $(ENV) plan
-
-infra: ## Apply infra: make infra ENV=dev
-	$(TF) $(ENV) apply -auto-approve
-
-deploy-backend: ## Build + roll out the Go binary
-	devops/scripts/deploy-backend.sh $(ENV)
-
-deploy-web: ## Build + publish the React app
-	devops/scripts/deploy-web.sh $(ENV)
-
-deploy: infra deploy-backend deploy-web ## Infra + backend + web for ENV
-	@echo "API: $$($(TF) $(ENV) output -raw api_url)"
-	@echo "Web: $$($(TF) $(ENV) output -raw web_url)"
-
-destroy: ## Tear down an environment: make destroy ENV=dev
-	$(TF) $(ENV) destroy
 
 mobile: ## Start Expo pointed at your local backend
 	cd mobile && EXPO_PUBLIC_API_URL=http://localhost:8080 npx expo start
+
+# ---------- AWS: everything runs in GitHub Actions ----------
+# Push your commits first; workflows build what is on GitHub.
+
+deploy: ## Deploy via Actions: make deploy ENV=dev COMPONENT=all|infra|backend|web
+	$(RUN) deploy.yml -f env=$(ENV) -f component=$(COMPONENT)
+
+plan: ## Terraform plan via Actions (no changes applied): make plan ENV=dev
+	$(RUN) plan.yml -f env=$(ENV)
+
+status: ## Recent workflow runs
+	gh run list --limit 10
+
+logs: ## Logs of the latest run of a workflow: make logs WF=deploy.yml
+	gh run view $$(gh run list --workflow $(or $(WF),deploy.yml) --limit 1 --json databaseId -q '.[0].databaseId') --log
+
+mobile-build: ## EAS build via Actions: make mobile-build PROFILE=preview ENV=dev
+	$(RUN) mobile-release.yml -f profile=$(or $(PROFILE),preview) -f env=$(ENV) -f platform=all

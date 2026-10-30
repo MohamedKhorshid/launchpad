@@ -29,7 +29,21 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { sparse-checkout: devops, sparse-checkout-cone-mode: true }
+      - id: check
+        run: |
+          if [ -f devops/project.env ]; then echo "configured=true" >> "$GITHUB_OUTPUT"
+          else echo "configured=false" >> "$GITHUB_OUTPUT"; echo "::notice::Not set up yet. Run the 'Setup (one-time)' workflow first."; fi
+
   build:
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: mobile } }
     steps:

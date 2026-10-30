@@ -1,0 +1,137 @@
+name: Setup (one-time)
+
+# Connects this repo to an AWS account. Run once per new project:
+#   1. Add repo secrets AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+#      (+ AWS_SESSION_TOKEN if they are temporary SSO credentials: preferred)
+#   2. gh workflow run setup.yml -f project=my-idea -f bundle_id=com.me.myidea
+#   3. Delete the secrets afterwards. All later deploys use keyless OIDC.
+# Re-running is safe: it reuses the existing state bucket and role.
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Project slug (lowercase, used in AWS resource names)
+        required: true
+      display_name:
+        description: App display name (defaults to the slug, title-cased)
+        required: false
+      bundle_id:
+        description: iOS bundle id / Android package, e.g. com.acme.myidea
+        required: true
+      region:
+        description: AWS region
+        default: us-east-1
+      deploy_dev:
+        description: Deploy the dev environment when done
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # commit the renamed project + devops/project.env
+  actions: write    # dispatch the first deploy
+
+concurrency:
+  group: setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check one-time credentials
+        env:
+          KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          SECRET: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$SECRET" ]; then
+            echo "::error::Add repo secrets AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (admin, one-time) and re-run."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.region }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.13", terraform_wrapper: false }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.mod }
+
+      - name: Rename template
+        if: hashFiles('devops/project.env') == ''
+        run: |
+          NAME="${{ inputs.display_name }}"
+          [ -n "$NAME" ] || NAME="$(echo '${{ inputs.project }}' | perl -pe 's/(^|-)(\w)/ \u$2/g; s/^ //')"
+          scripts/rename-project.sh "${{ inputs.project }}" "$NAME" "${{ inputs.bundle_id }}"
+
+      - name: Create state bucket + GitHub deploy role
+        working-directory: devops/terraform/bootstrap
+        env:
+          PROJECT: ${{ inputs.project }}
+          REGION: ${{ inputs.region }}
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          BUCKET="$PROJECT-tfstate-$ACCOUNT_ID"
+
+          # Restore previous bootstrap state if this is a re-run.
+          aws s3 cp "s3://$BUCKET/bootstrap/terraform.tfstate" terraform.tfstate --only-show-errors 2>/dev/null \
+            && echo "Restored existing bootstrap state" || true
+
+          CREATE_OIDC=true
+          if [ ! -f terraform.tfstate ] && aws iam list-open-id-connect-providers --output text | grep -q token.actions.githubusercontent.com; then
+            CREATE_OIDC=false   # provider already exists in this account (another project)
+          elif [ -f terraform.tfstate ] && ! grep -q '"aws_iam_openid_connect_provider"' terraform.tfstate; then
+            CREATE_OIDC=false
+          fi
+
+          terraform init -input=false
+          terraform apply -input=false -auto-approve \
+            -var="project=$PROJECT" -var="region=$REGION" \
+            -var="github_repo=${{ github.repository }}" -var="create_oidc_provider=$CREATE_OIDC"
+
+          aws s3 cp terraform.tfstate "s3://$BUCKET/bootstrap/terraform.tfstate" --only-show-errors
+
+          cat > ../../project.env <<EOF
+          # Written by .github/workflows/setup.yml. Committed on purpose: contains no secrets.
+          # CI sources this file to know where and how to deploy.
+          PROJECT=$PROJECT
+          AWS_REGION=$REGION
+          AWS_ACCOUNT_ID=$ACCOUNT_ID
+          TF_STATE_BUCKET=$(terraform output -raw state_bucket)
+          AWS_ROLE_ARN=$(terraform output -raw deploy_role_arn)
+          GITHUB_REPO=${{ github.repository }}
+          EOF
+          sed -i 's/^ *//' ../../project.env
+          cat ../../project.env
+
+      - name: Commit project configuration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing to commit"; exit 0; fi
+          git commit -m "Set up ${{ inputs.project }} on AWS (${{ inputs.region }})"
+          git push
+
+      - name: Trigger first dev deploy
+        if: inputs.deploy_dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref "${{ github.ref_name }}" -f env=dev -f component=all
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ inputs.project }} is connected to AWS"
+            echo "- Region: ${{ inputs.region }}"
+            echo "- Deploys now use keyless OIDC. **Delete the AWS_* repo secrets:**"
+            echo '  `gh secret delete AWS_ACCESS_KEY_ID; gh secret delete AWS_SECRET_ACCESS_KEY; gh secret delete AWS_SESSION_TOKEN`'
+            if [ "${{ inputs.deploy_dev }}" = "true" ]; then
+              echo "- First dev deploy started: see the Deploy workflow (~10 min)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

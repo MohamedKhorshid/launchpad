@@ -29,7 +29,8 @@ description: Implement a UI design (Claude Design export, Figma link, screenshot
    missing, add it to the backend first (see `add-backend-module`).
 5. **States**: every screen handles loading, empty, error, and success.
 6. **Verify**: `cd web && npm run build`, `cd mobile && npm run typecheck`.
-   Run `make dev` and describe what to check in the browser. If a browser tool is
+   Run `make dev` and describe what to check in the browser. To show it on the
+   real dev URL, push and let the `deploy` skill ship `COMPONENT=web`. If a browser tool is
    available, screenshot the web app and compare against the design.
 
 If the `frontend-design` plugin is enabled, use it for aesthetic decisions the

@@ -22,16 +22,20 @@ Check each; stop and tell the user exactly what to do for anything missing:
 5. **Store listings**: create the app in App Store Connect and Play Console.
    Google requires the first upload to be done manually; download the first
    production `.aab` from EAS and upload it in Play Console.
-6. **CI token**: create an Expo access token and add it as the `EXPO_TOKEN`
-   repo secret: `gh secret set EXPO_TOKEN`.
+6. **CI token**: the user creates an Expo access token and runs
+   `gh secret set EXPO_TOKEN` themselves (you never handle secrets).
 
 ## Each release
 
-- Internal test build (no stores): `gh workflow run mobile-release.yml -f profile=preview -f env=dev`
-- Store release: `gh workflow run mobile-release.yml -f profile=production -f env=prod -f submit=true`
+Builds run in GitHub Actions; trigger and follow them with `scripts/run-workflow.sh`
+(ask the user first: builds use EAS quota and store submissions are visible to testers).
+
+- Internal test build (no stores): `scripts/run-workflow.sh mobile-release.yml -f profile=preview -f env=dev`
+- Store release: `scripts/run-workflow.sh mobile-release.yml -f profile=production -f env=prod -f submit=true`
+- The workflow starts the EAS build and finishes; follow the build itself at expo.dev.
   (iOS lands in TestFlight; Android in the internal testing track. Promote in the consoles.)
 - JS-only fixes can ship over the air: `npx eas-cli@latest update --channel production`
   (only when no native dependency changed).
 
 Before any release: `npm run typecheck`, `npx expo install --check`, and confirm
-the target backend env is deployed (`tf.sh <env> output -raw api_url`).
+the target backend env is deployed (latest Deploy run for that env succeeded: `make status`).

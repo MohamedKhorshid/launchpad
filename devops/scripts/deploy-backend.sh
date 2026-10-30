@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
+# CI-only: called by .github/workflows/deploy.yml.
 # Build the Go binary, upload it, and roll it out to the EC2 instance via SSM.
 #   devops/scripts/deploy-backend.sh dev
 set -euo pipefail
+
+# Deploys run in GitHub Actions (see .github/workflows/deploy.yml).
+# Set ALLOW_LOCAL_DEPLOY=1 only for emergencies when Actions is unavailable.
+if [ "${CI:-}" != "true" ] && [ "${ALLOW_LOCAL_DEPLOY:-}" != "1" ]; then
+  echo "Deploys run in GitHub Actions. Use: make deploy ENV=<env>  (gh workflow run deploy.yml)" >&2
+  exit 1
+fi
 
 ENV="${1:?usage: deploy-backend.sh <env>}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

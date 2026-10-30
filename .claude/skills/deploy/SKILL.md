@@ -1,40 +1,59 @@
 ---
 name: deploy
-description: Ship the current code to AWS (dev or prod) and verify it works. Use when the user says deploy, ship, release to AWS, push it live, or asks why a deploy failed.
+description: Ship code to AWS (dev or prod) through GitHub Actions and verify it works; also run Terraform plans and diagnose failed deploys. Use when the user says deploy, ship, release, push it live, plan infra, or asks why a deploy failed.
 ---
 
-# Deploy
+# Deploy (via GitHub Actions only)
+
+All AWS changes happen in GitHub Actions. You trigger workflows with
+`scripts/run-workflow.sh` (or `make`), which starts the run, waits, and prints
+`RUN_RESULT <conclusion> <url>` plus the failed-step logs if it fails.
+Never run `devops/scripts/*`, `terraform apply`, or `aws` commands locally.
 
 ## Preflight
 
-1. `devops/project.env` must exist. If not, tell the user to run `make setup`.
-2. `make lint && make test` must pass. Fix failures before deploying.
-3. `make plan ENV=<env>`; summarize what changes (adds/changes/destroys). If
-   anything is **destroyed or replaced** (especially `aws_instance`), call it out
-   and get explicit confirmation.
+1. `devops/project.env` must exist. If not, the repo isn't connected to AWS:
+   ask the user to run `make setup` themselves (it needs their AWS credentials).
+2. `make lint && make test` pass.
+3. Commit and **push** (ask before pushing). Workflows build what is on GitHub,
+   not the local tree; `run-workflow.sh` warns if they differ.
 
-## Preferred path: CI
+## Commands
 
-If the repo has a GitHub remote, the normal deploy is: commit, push to `main`
-(dev deploys automatically), watch with `gh run watch`. For prod:
-`gh workflow run deploy.yml -f env=prod` - only when the user explicitly asks.
+| Goal | Command |
+|------|---------|
+| Preview infra changes | `make plan ENV=dev` |
+| Deploy everything to dev | `make deploy ENV=dev` (also happens automatically on push to `main`) |
+| Deploy one part | `make deploy ENV=dev COMPONENT=backend` (`infra`, `backend`, `web`) |
+| Recreate the EC2 instance (user data changed) | `scripts/run-workflow.sh deploy.yml -f env=dev -f component=infra -f replace_backend_instance=true` |
+| Deploy to prod | `make deploy ENV=prod`: only when the user explicitly asks; runs from `main`; may wait for a reviewer in the GitHub `prod` environment |
+| Check runs / logs | `make status`, `gh run view <id> --log-failed` |
 
-## Local path
+After a push to `main`, follow the automatic dev deploy:
+`gh run watch $(gh run list --workflow deploy.yml --limit 1 --json databaseId -q '.[0].databaseId') --exit-status`
 
-`make deploy ENV=dev` (infra, then backend, then web). Never prod locally unless
-the user explicitly asks in this conversation.
+Before a deploy that includes `infra`, run `make plan ENV=<env>` and summarize
+the `PLAN_RESULT` line. If anything is **destroyed or replaced** (the plan log
+warns about it), stop and get explicit confirmation.
 
 ## Verify
 
-- `curl -fsS $(devops/scripts/tf.sh dev output -raw api_url)/health` returns the new version (git sha).
-- Open the web URL (`tf.sh dev output -raw web_url`).
+The run prints `DEPLOY_RESULT env=... web=<url> api=<url> sha=<sha>`.
+Check `curl -fsS <api>/health` reports that sha as `version`, and give the user the web URL.
 
 ## When it fails
 
-| Symptom | Likely cause / fix |
-|---------|--------------------|
-| SSM command never runs | Instance still booting, or SSM agent not registered: wait 2-3 min, check `aws ssm describe-instance-information` |
-| `deploy.sh` health check fails | App crashes on start: `aws ssm send-command ... journalctl -u app -n 100`; it auto-rolls back |
-| API returns 503 | Cloud Map registration / VPC link not ready (first deploy takes ~5 min), or app down |
-| CORS errors in browser | Origin missing from `extra_cors_origins` / CloudFront domain; re-apply |
-| Terraform state lock | Another run in progress; wait, or `terraform force-unlock` only if certain |
+Read the failed step's log (printed by `run-workflow.sh`), then:
+
+| Failed step / symptom | Likely cause / fix |
+|-----------------------|--------------------|
+| `preflight` skipped everything | Repo not set up: user runs `make setup` |
+| Configure AWS credentials | Role trust doesn't match this repo (repo renamed/transferred): re-run setup |
+| Infrastructure | Read the Terraform error; fix HCL, push, redeploy. State lock: another run is active; wait |
+| Backend: SSM never runs | First boot still in progress or SSM agent not registered; re-run `COMPONENT=backend` after 3 min |
+| Backend: health check failed | App crashes on start; `deploy.sh` already rolled back. Reproduce with `make dev`, fix, redeploy |
+| API returns 503 | VPC link / Cloud Map not ready (first deploy ~5 min) or app down |
+| CORS errors | Origin missing from `extra_cors_origins`; edit tfvars, deploy `infra` |
+| Stuck waiting | `prod` environment needs reviewer approval in GitHub |
+
+Re-run a failed run as-is with `gh run rerun <id> --failed` (ask first).

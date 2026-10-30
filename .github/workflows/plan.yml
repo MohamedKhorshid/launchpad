@@ -1,0 +1,84 @@
+name: Plan
+
+# Terraform plan without applying.
+#   - Automatically on PRs that touch devops/ (plan posted as a PR comment)
+#   - On demand:  gh workflow run plan.yml -f env=dev
+# The plan and current outputs are printed in the log (gh run view <id> --log).
+on:
+  pull_request:
+    paths: ["devops/**"]
+  workflow_dispatch:
+    inputs:
+      env:
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: plan-${{ github.ref }}-${{ inputs.env || 'dev' }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { sparse-checkout: devops, sparse-checkout-cone-mode: true }
+      - id: check
+        run: |
+          if [ -f devops/project.env ]; then echo "configured=true" >> "$GITHUB_OUTPUT"
+          else echo "configured=false" >> "$GITHUB_OUTPUT"; echo "::notice::Not set up yet. Run the 'Setup (one-time)' workflow first."; fi
+
+  plan:
+    # Needs AWS (setup done) and OIDC (not available to fork PRs).
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    env:
+      ENV: ${{ inputs.env || 'dev' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Load project settings
+        run: grep -E '^[A-Z_]+=' devops/project.env >> "$GITHUB_ENV"
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.13", terraform_wrapper: false }
+
+      - name: Plan
+        id: plan
+        run: |
+          set -o pipefail
+          devops/scripts/tf.sh "$ENV" plan -no-color -lock=false -detailed-exitcode | tee plan.txt || code=$?
+          code=${code:-0}
+          [ "$code" = 1 ] && exit 1
+          SUMMARY="$(grep -E '^(Plan:|No changes\.)' plan.txt | tail -1)"
+          echo "summary=${SUMMARY:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "PLAN_RESULT env=$ENV ${SUMMARY}"
+          if grep -qE 'must be replaced|will be destroyed' plan.txt; then
+            echo "::warning::Plan destroys or replaces resources. Review before deploying."
+            grep -E '^\s+# .*(must be replaced|will be destroyed)' plan.txt || true
+          fi
+
+      - name: Current outputs
+        run: devops/scripts/tf.sh "$ENV" output || true
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('plan.txt', 'utf8');
+            if (plan.length > 60000) plan = plan.slice(-60000);
+            const body = `#### Terraform plan (\`${process.env.ENV}\`): ${{ toJSON(steps.plan.outputs.summary) }}\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>`;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });

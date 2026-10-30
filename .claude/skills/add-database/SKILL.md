@@ -39,7 +39,8 @@ Ask the user which option fits (one question), recommending based on the spec:
 
 ## Finish
 
-`make lint && make test`, `make plan ENV=dev`, show the plan summary, and ask
-before deploying. Note: changing user data does not replace the running
-instance; tell the user to run `devops/scripts/tf.sh dev apply -replace=module.backend.aws_instance.app`
-or update `/etc/app/env` via SSM.
+`make lint && make test`, push (ask first), `make plan ENV=dev`, show the
+`PLAN_RESULT`, and ask before deploying. Changing user data does not touch the
+running instance; deploy with
+`scripts/run-workflow.sh deploy.yml -f env=dev -f component=infra -f replace_backend_instance=true`
+(the instance is recreated and the latest binary is installed on boot).
