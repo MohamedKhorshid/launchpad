@@ -3,6 +3,13 @@
 Friction found while building real products from this template. Newest first.
 Claude appends here via the `template-feedback` skill.
 
+## 2026-10-31 - First CI run failed: terraform fmt + Expo versions
+- **Stage:** infra, mobile
+- **What happened:** CI failed on `terraform fmt -check` (misaligned `=` in the `module "api"` block of `devops/terraform/app/main.tf`) and on `npx expo install --check` (`react-native-safe-area-context` was `^5.11.0`; SDK 58 wants `~5.10.1`).
+- **Workaround:** Realigned the block; pinned the package to `~5.10.1` (read from `node_modules/expo/bundledNativeModules.json` because `expo install` couldn't reach Expo's API from the build sandbox).
+- **Template fix:** Done in the template. Lesson: run `terraform fmt` and `npx expo install --check` before the first commit.
+- **Severity:** blocker (fixed)
+
 ## 2026-10-31 - Deploys moved to GitHub Actions: check on first run
 - **Stage:** setup, deploy
 - **What happened:** Local deploy scripts were replaced by workflows (Setup, Deploy, Plan, Destroy). None have run against a real account yet.

@@ -26,12 +26,12 @@ module "backend" {
 }
 
 module "api" {
-  source          = "../modules/api"
-  name            = local.name
-  vpc_id          = module.network.vpc_id
-  subnet_ids      = module.network.public_subnet_ids
-  cloudmap_arn    = module.backend.cloudmap_service_arn
-  cors_origins    = concat(["https://${module.web.domain}"], var.extra_cors_origins)
-  throttle_rate   = var.api_throttle_rate
-  throttle_burst  = var.api_throttle_burst
+  source         = "../modules/api"
+  name           = local.name
+  vpc_id         = module.network.vpc_id
+  subnet_ids     = module.network.public_subnet_ids
+  cloudmap_arn   = module.backend.cloudmap_service_arn
+  cors_origins   = concat(["https://${module.web.domain}"], var.extra_cors_origins)
+  throttle_rate  = var.api_throttle_rate
+  throttle_burst = var.api_throttle_burst
 }
