@@ -1,0 +1,65 @@
+name: Deploy
+
+# main -> dev automatically. prod -> manual run (protected by the
+# "prod" GitHub environment: add required reviewers in repo settings).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  id-token: write   # keyless AWS login via OIDC
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.env || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Template repos are not bootstrapped yet: skip until devops/project.env exists.
+    if: hashFiles('devops/project.env') != ''
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env || 'dev' }}
+    env:
+      ENV: ${{ inputs.env || 'dev' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Load project settings
+        run: grep -E '^[A-Z_]+=' devops/project.env >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.13", terraform_wrapper: false }
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.mod }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+
+      - name: Infrastructure
+        run: devops/scripts/tf.sh "$ENV" apply -auto-approve
+
+      - name: Backend
+        run: devops/scripts/deploy-backend.sh "$ENV"
+
+      - name: Web
+        run: devops/scripts/deploy-web.sh "$ENV"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`$ENV\`"
+            echo "- Web: $(devops/scripts/tf.sh "$ENV" output -raw web_url)"
+            echo "- API: $(devops/scripts/tf.sh "$ENV" output -raw api_url)"
+          } >> "$GITHUB_STEP_SUMMARY"

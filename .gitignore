@@ -1,0 +1,28 @@
+# deps / builds
+node_modules/
+dist/
+backend/bin/
+.expo/
+mobile/ios/
+mobile/android/
+*.tsbuildinfo
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+
+# secrets / local
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.jks
+*.keystore
+google-service-account*.json
+.claude/settings.local.json
+.DS_Store

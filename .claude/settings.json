@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make test)",
+      "Bash(make lint)",
+      "Bash(make plan:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go build:*)",
+      "Bash(gofmt:*)",
+      "Bash(npm test)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run build)",
+      "Bash(npx expo install --check)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate)",
+      "Bash(devops/scripts/tf.sh dev plan:*)",
+      "Bash(devops/scripts/tf.sh dev output:*)",
+      "Bash(devops/scripts/tf.sh prod output:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": [
+      "Bash(make deploy:*)",
+      "Bash(make infra:*)",
+      "Bash(devops/scripts/tf.sh dev apply:*)",
+      "Bash(devops/scripts/deploy-backend.sh:*)",
+      "Bash(devops/scripts/deploy-web.sh:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Bash(make destroy:*)",
+      "Bash(devops/scripts/tf.sh prod apply:*)",
+      "Bash(devops/scripts/tf.sh prod destroy:*)",
+      "Bash(devops/scripts/tf.sh dev destroy:*)",
+      "Bash(terraform destroy:*)",
+      "Read(./**/.env)",
+      "Read(./**/*.tfstate)"
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "hashicorp": {
+      "source": { "source": "github", "repo": "hashicorp/agent-skills" }
+    }
+  },
+  "enabledPlugins": {
+    "expo@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true
+  }
+}

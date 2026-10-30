@@ -1,0 +1,68 @@
+name: Mobile release
+
+# Builds in Expo's cloud (EAS) and optionally submits to App Store Connect
+# (TestFlight) and Google Play (internal track).
+# One-time setup: docs/mobile-release.md  (needs the EXPO_TOKEN repo secret)
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        options: [all, ios, android]
+        default: all
+      profile:
+        type: choice
+        options: [preview, production]
+        default: preview
+      env:
+        description: Backend environment the app talks to
+        type: choice
+        options: [dev, prod]
+        default: dev
+      submit:
+        description: Submit to the stores (production profile only)
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Load project settings
+        working-directory: .
+        run: grep -E '^[A-Z_]+=' devops/project.env >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.13", terraform_wrapper: false }
+
+      - name: Point the app at the backend
+        working-directory: .
+        run: echo "EXPO_PUBLIC_API_URL=$(devops/scripts/tf.sh ${{ inputs.env }} output -raw api_url)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+
+      - name: Build
+        run: |
+          SUBMIT=""
+          if [ "${{ inputs.submit }}" = "true" ] && [ "${{ inputs.profile }}" = "production" ]; then
+            SUBMIT="--auto-submit"
+          fi
+          eas build --platform ${{ inputs.platform }} --profile ${{ inputs.profile }} \
+            --non-interactive --no-wait $SUBMIT

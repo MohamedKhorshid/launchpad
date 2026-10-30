@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: backend/go.mod, cache-dependency-path: backend/go.mod }
+      - run: make lint
+      - run: go test -race ./...
+      - run: make build-linux
+
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm, cache-dependency-path: mobile/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Check Expo SDK dependency versions
+        run: npx expo install --check
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.13" }
+      - run: terraform fmt -check -recursive devops/terraform
+      - name: Validate app stack
+        working-directory: devops/terraform/app
+        run: terraform init -backend=false -input=false && terraform validate
+      - name: Validate bootstrap stack
+        working-directory: devops/terraform/bootstrap
+        run: terraform init -backend=false -input=false && terraform validate

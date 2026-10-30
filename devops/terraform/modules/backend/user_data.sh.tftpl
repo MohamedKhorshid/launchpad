@@ -1,0 +1,66 @@
+#!/bin/bash
+# First-boot setup for the Go backend on Amazon Linux 2023.
+set -euo pipefail
+
+useradd --system --no-create-home --shell /sbin/nologin app || true
+mkdir -p /opt/app /etc/app
+
+cat > /etc/app/env <<'ENV'
+APP_ENV=${env}
+APP_ADDR=:${port}
+APP_ALLOWED_ORIGINS=${cors_origins}
+APP_LOG_LEVEL=info
+ENV
+
+cat > /etc/systemd/system/app.service <<'UNIT'
+[Unit]
+Description=Backend (Go modular monolith)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=app
+EnvironmentFile=/etc/app/env
+ExecStart=/opt/app/server
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Called by CI through SSM: deploy.sh <s3 key of binary>
+cat > /opt/app/deploy.sh <<'DEPLOY'
+#!/bin/bash
+set -euo pipefail
+KEY="$1"
+aws s3 cp "s3://${bucket}/$KEY" /opt/app/server.new
+chmod 0755 /opt/app/server.new
+[ -f /opt/app/server ] && cp /opt/app/server /opt/app/server.prev
+mv /opt/app/server.new /opt/app/server
+systemctl restart app
+for i in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${port}/health"; then echo; echo "deploy ok"; exit 0; fi
+  sleep 1
+done
+echo "health check failed, rolling back"
+journalctl -u app -n 50 --no-pager || true
+if [ -f /opt/app/server.prev ]; then mv /opt/app/server.prev /opt/app/server; systemctl restart app; fi
+exit 1
+DEPLOY
+chmod 0755 /opt/app/deploy.sh
+
+systemctl daemon-reload
+systemctl enable app
+
+# If a build was already published (instance replaced), start it right away.
+if aws s3 cp "s3://${bucket}/backend/latest/server" /opt/app/server; then
+  chmod 0755 /opt/app/server
+  systemctl start app
+else
+  echo "No backend build yet; the first CI deploy will start the service."
+fi
