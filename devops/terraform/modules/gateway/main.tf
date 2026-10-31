@@ -142,6 +142,9 @@ resource "aws_instance" "gateway" {
   primary_network_interface {
     network_interface_id = aws_network_interface.gateway.id
   }
+  # Must match the ENI: the instance attribute defaults to true and would
+  # otherwise re-enable the check on every apply, silently breaking NAT.
+  source_dest_check = false
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only

@@ -3,6 +3,13 @@
 Friction found while building real products from this template. Newest first.
 Claude appends here via the `template-feedback` skill.
 
+## 2026-10-31 - Kong gateway: Terraform re-enabled source/dest check (NAT broke)
+- **Stage:** infra
+- **What happened:** The gateway's ENI has `source_dest_check = false` for NAT, but `aws_instance` defaults the attribute to `true`, so the second apply flipped it back (`source_dest_check = false -> true`), silently cutting the private backend off from the internet.
+- **Workaround:** None (fixed in the template).
+- **Template fix:** Done. `source_dest_check = false` on the instance too, and `deploy-gateway.sh` now fails loudly if the check is ever enabled.
+- **Severity:** blocker for backend egress (fixed)
+
 ## 2026-10-31 - First dev deploy: CloudFront blocked on a new AWS account
 - **Stage:** infra
 - **What happened:** `tf apply` created network, IAM, S3, Cloud Map and the VPC link, then failed on `aws_cloudfront_distribution.site`: `AccessDenied: Your account must be verified before you can add new CloudFront resources`. AWS applies this hold to many new accounts.

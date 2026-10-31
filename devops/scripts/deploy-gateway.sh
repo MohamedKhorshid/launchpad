@@ -43,3 +43,14 @@ rm -f "$OUT"
 echo "==> Applying on $INSTANCE"
 "$ROOT/devops/scripts/ssm-run.sh" "$INSTANCE" "/opt/gateway/deploy.sh $KEY" "gateway $VERSION"
 echo "Gateway config $VERSION is live."
+
+# The gateway is also the private subnet's NAT, which only works with the
+# source/dest check off. Catch drift here instead of as a backend without internet.
+CHECK="$(aws ec2 describe-instance-attribute --instance-id "$INSTANCE" --attribute sourceDestCheck \
+  --query SourceDestCheck.Value --output text)"
+if [ "$CHECK" != "False" ]; then
+  echo "Gateway source/dest check is enabled, so NAT for the private subnet is broken." >&2
+  echo "Fix: make deploy ENV=$ENV COMPONENT=infra (Terraform sets it back to false)." >&2
+  exit 1
+fi
+echo "NAT forwarding enabled on the gateway."
