@@ -40,22 +40,45 @@ BUNDLE="$(ask "iOS bundle id / Android package" "com.$OWNER.$(echo "$PROJECT" | 
 REGION="$(ask "AWS region" "${AWS_REGION:-us-east-1}")"
 
 bold "3/4  AWS credentials (one-time, deleted right after setup)"
-if command -v aws >/dev/null && PROFILE="$(ask "Local AWS CLI profile to hand over (or 'manual')" "${AWS_PROFILE:-default}")" \
-   && [ "$PROFILE" != "manual" ]; then
+put_secret() { printf '%s' "$2" | gh secret set "$1" --repo "$REPO" >/dev/null; }
+secret_prompt() { # secret_prompt "Label" -> echoes hidden input
+  local v; read -r -s -p "  $1: " v; echo >&2; echo "$v"
+}
+
+METHOD="paste"
+if command -v aws >/dev/null; then
+  echo "  The AWS CLI is installed. You can hand over a local profile (nothing to copy)."
+  PROFILE="$(ask "AWS CLI profile name, or 'paste' to enter keys by hand" "${AWS_PROFILE:-default}")"
+  [ "$PROFILE" = "paste" ] || METHOD="profile"
+else
+  echo "  AWS CLI not found, so keys will be entered by hand."
+  echo "  (Prefer profiles? Ctrl-C, run 'brew install awscli && aws configure sso', then re-run.)"
+fi
+
+if [ "$METHOD" = "profile" ]; then
   # Exports the profile's (ideally short-lived SSO) credentials straight into
   # repo secrets without printing them.
   CREDS="$(aws configure export-credentials --profile "$PROFILE" --format env-no-export)" \
     || die "Could not read credentials for '$PROFILE'. Try: aws sso login --profile $PROFILE"
   while IFS='=' read -r k v; do
-    case "$k" in AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)
-      printf '%s' "$v" | gh secret set "$k" --repo "$REPO" ;;
-    esac
+    case "$k" in AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN) put_secret "$k" "$v" ;; esac
   done <<< "$CREDS"
   unset CREDS
+  echo "  Stored credentials from profile '$PROFILE'."
 else
-  echo "  Paste an admin access key for the target AWS account (input is hidden)."
-  gh secret set AWS_ACCESS_KEY_ID --repo "$REPO"
-  gh secret set AWS_SECRET_ACCESS_KEY --repo "$REPO"
+  echo "  From IAM > Users > <admin user> > Security credentials > Create access key,"
+  echo "  or the IAM Identity Center portal > Access keys. Input is hidden."
+  KEY_ID="$(secret_prompt "Access key ID (starts with AKIA or ASIA)")"
+  SECRET_KEY="$(secret_prompt "Secret access key")"
+  TOKEN=""
+  case "$KEY_ID" in ASIA*) TOKEN="$(secret_prompt "Session token (temporary credentials)")" ;; esac
+  [[ "$KEY_ID" =~ ^A[SK]IA[A-Z0-9]{12,}$ ]] || die "That doesn't look like an access key ID (expected AKIA... or ASIA...)."
+  [ -n "$SECRET_KEY" ] || die "Secret access key is empty."
+  put_secret AWS_ACCESS_KEY_ID "$KEY_ID"
+  put_secret AWS_SECRET_ACCESS_KEY "$SECRET_KEY"
+  [ -z "$TOKEN" ] || put_secret AWS_SESSION_TOKEN "$TOKEN"
+  unset KEY_ID SECRET_KEY TOKEN
+  echo "  Stored as temporary repo secrets."
 fi
 
 bold "4/4  Running the Setup workflow on GitHub"
