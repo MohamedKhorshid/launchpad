@@ -3,6 +3,13 @@
 Friction found while building real products from this template. Newest first.
 Claude appends here via the `template-feedback` skill.
 
+## 2026-10-31 - First dev deploy: Terraform "Invalid for_each argument"
+- **Stage:** infra
+- **What happened:** After OIDC worked, the first `tf apply` failed in `modules/backend`: `for_each = toset(var.allowed_from)` was fed the VPC link security group id, which is unknown until apply, so Terraform could not compute the keys. `terraform validate` passes; only a real first plan hits it.
+- **Workaround:** None (fixed in the template).
+- **Template fix:** Done. `allowed_from` is now a `map(string)` with static keys (`{ api_vpc_link = <sg id> }`). Rule: never build `for_each` keys from resource attributes.
+- **Severity:** blocker (fixed)
+
 ## 2026-10-31 - First dev deploy: OIDC role refused (immutable subject claims)
 - **Stage:** setup, deploy
 - **What happened:** Setup succeeded, but Deploy failed at `Configure AWS credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. The repo uses GitHub's immutable OIDC subjects, so the token `sub` is `repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:dev`; the deploy role only trusted `repo:<owner>/<repo>:*`.

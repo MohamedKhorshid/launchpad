@@ -9,8 +9,8 @@ variable "subnet_id" { type = string }
 variable "instance_type" { type = string }
 variable "app_port" { type = number }
 variable "allowed_from" {
-  type        = list(string)
-  description = "Security group IDs allowed to reach the app port"
+  type        = map(string)
+  description = "Security groups allowed to reach the app port, as { static_name = sg_id }. Keys must be static so for_each works when the ids are only known after apply."
 }
 variable "cors_origins" { type = list(string) }
 
@@ -93,7 +93,7 @@ resource "aws_security_group" "instance" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "app" {
-  for_each                     = toset(var.allowed_from)
+  for_each                     = var.allowed_from
   security_group_id            = aws_security_group.instance.id
   referenced_security_group_id = each.value
   ip_protocol                  = "tcp"

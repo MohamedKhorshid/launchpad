@@ -21,7 +21,7 @@ module "backend" {
   subnet_id     = module.network.public_subnet_ids[0]
   instance_type = var.instance_type
   app_port      = var.app_port
-  allowed_from  = [module.api.vpc_link_security_group_id]
+  allowed_from  = { api_vpc_link = module.api.vpc_link_security_group_id }
   cors_origins  = concat(["https://${module.web.domain}"], var.extra_cors_origins)
 }
 
