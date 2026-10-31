@@ -142,9 +142,6 @@ resource "aws_instance" "gateway" {
   primary_network_interface {
     network_interface_id = aws_network_interface.gateway.id
   }
-  # Must match the ENI: the instance attribute defaults to true and would
-  # otherwise re-enable the check on every apply, silently breaking NAT.
-  source_dest_check = false
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
@@ -171,7 +168,11 @@ resource "aws_instance" "gateway" {
   depends_on = [aws_eip.gateway]
 
   lifecycle {
-    ignore_changes = [ami]
+    # source_dest_check is owned by the ENI (false, for NAT). The instance
+    # attribute defaults to true and can't be set alongside
+    # primary_network_interface, so without this every apply re-enables the
+    # check and silently breaks NAT.
+    ignore_changes = [ami, source_dest_check]
   }
 }
 

@@ -7,7 +7,7 @@ Claude appends here via the `template-feedback` skill.
 - **Stage:** infra
 - **What happened:** The gateway's ENI has `source_dest_check = false` for NAT, but `aws_instance` defaults the attribute to `true`, so the second apply flipped it back (`source_dest_check = false -> true`), silently cutting the private backend off from the internet.
 - **Workaround:** None (fixed in the template).
-- **Template fix:** Done. `source_dest_check = false` on the instance too, and `deploy-gateway.sh` now fails loudly if the check is ever enabled.
+- **Template fix:** Done. The instance ignores `source_dest_check` (the ENI owns it; setting it on the instance conflicts with `primary_network_interface`, which `terraform validate` doesn't catch), and `deploy-gateway.sh` now fails loudly if the check is ever enabled.
 - **Severity:** blocker for backend egress (fixed)
 
 ## 2026-10-31 - First dev deploy: CloudFront blocked on a new AWS account
