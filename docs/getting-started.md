@@ -84,9 +84,9 @@ make status                      # recent runs
 
 ## Costs (rough, us-east-1, idle)
 
-EC2 t4g.small ~$12, public IPv4 ~$4, Cloud Map private namespace ~$0.50,
-CloudFront / API Gateway / S3 cents at low traffic. **About $15-25/month per
-environment.** Run the **Destroy** workflow to remove an environment.
+Backend EC2 t4g.small ~$12, Kong gateway EC2 t4g.micro ~$6, one public IPv4
+(the gateway's) ~$4, CloudFront / S3 cents at low traffic. **About $22-30/month
+per environment.** Run the **Destroy** workflow to remove an environment.
 
 ## Tear down completely
 

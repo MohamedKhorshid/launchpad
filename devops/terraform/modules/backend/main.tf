@@ -1,11 +1,19 @@
 # The Go modular monolith on one EC2 instance, managed by systemd.
+# Lives in the PRIVATE subnet: no public IP, only the gateway can reach it.
 # Deploys: CI uploads a binary to the artifacts bucket, then runs
 # /opt/app/deploy.sh on the instance through SSM (no SSH, no open ports).
 
 variable "name" { type = string }
 variable "env" { type = string }
 variable "vpc_id" { type = string }
-variable "subnet_id" { type = string }
+variable "subnet_id" {
+  type        = string
+  description = "Private subnet"
+}
+variable "private_ip" {
+  type        = string
+  description = "Fixed private IP, so the gateway config can point at it"
+}
 variable "instance_type" { type = string }
 variable "app_port" { type = number }
 variable "allowed_from" {
@@ -38,6 +46,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
     id     = "expire-old-builds"
     status = "Enabled"
     filter { prefix = "backend/builds/" }
+    expiration { days = 30 }
+  }
+  rule {
+    id     = "expire-old-gateway-configs"
+    status = "Enabled"
+    filter { prefix = "gateway/builds/" }
     expiration { days = 30 }
   }
 }
@@ -88,7 +102,7 @@ resource "aws_iam_instance_profile" "instance" {
 # ---------- Network ----------
 resource "aws_security_group" "instance" {
   name        = "${var.name}-backend"
-  description = "Go backend: app port from API Gateway VPC link only"
+  description = "Go backend: app port from the gateway only"
   vpc_id      = var.vpc_id
 }
 
@@ -109,11 +123,13 @@ resource "aws_vpc_security_group_egress_rule" "all" {
 
 # ---------- Instance ----------
 resource "aws_instance" "app" {
-  ami                    = data.aws_ssm_parameter.al2023_arm64.insecure_value
-  instance_type          = var.instance_type
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [aws_security_group.instance.id]
-  iam_instance_profile   = aws_iam_instance_profile.instance.name
+  ami                         = data.aws_ssm_parameter.al2023_arm64.insecure_value
+  instance_type               = var.instance_type
+  subnet_id                   = var.subnet_id
+  private_ip                  = var.private_ip
+  associate_public_ip_address = false
+  vpc_security_group_ids      = [aws_security_group.instance.id]
+  iam_instance_profile        = aws_iam_instance_profile.instance.name
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
@@ -140,33 +156,7 @@ resource "aws_instance" "app" {
   }
 }
 
-# ---------- Cloud Map (lets API Gateway find the instance via VPC link) ----------
-resource "aws_service_discovery_private_dns_namespace" "this" {
-  name = "${var.name}.internal"
-  vpc  = var.vpc_id
-}
-
-resource "aws_service_discovery_service" "backend" {
-  name = "backend"
-  dns_config {
-    namespace_id = aws_service_discovery_private_dns_namespace.this.id
-    dns_records {
-      type = "SRV"
-      ttl  = 10
-    }
-    routing_policy = "MULTIVALUE"
-  }
-}
-
-resource "aws_service_discovery_instance" "app" {
-  instance_id = aws_instance.app.id
-  service_id  = aws_service_discovery_service.backend.id
-  attributes = {
-    AWS_INSTANCE_IPV4 = aws_instance.app.private_ip
-    AWS_INSTANCE_PORT = tostring(var.app_port)
-  }
-}
-
-output "cloudmap_service_arn" { value = aws_service_discovery_service.backend.arn }
 output "artifacts_bucket" { value = aws_s3_bucket.artifacts.bucket }
+output "artifacts_bucket_arn" { value = aws_s3_bucket.artifacts.arn }
+output "private_ip" { value = aws_instance.app.private_ip }
 output "instance_id" { value = aws_instance.app.id }

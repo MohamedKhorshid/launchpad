@@ -1,6 +1,17 @@
 # React SPA: private S3 bucket served through CloudFront (Origin Access Control).
+# The same distribution routes /api/* to the Kong gateway, so web and API share
+# one HTTPS origin (CloudFront's certificate, no CORS for the web app).
 
 variable "name" { type = string }
+variable "api_origin_domain" {
+  type        = string
+  description = "Public DNS name of the gateway"
+}
+variable "api_origin_port" { type = number }
+variable "api_origin_secret" {
+  type      = string
+  sensitive = true
+}
 
 resource "aws_s3_bucket" "site" {
   bucket_prefix = "${var.name}-web-"
@@ -23,6 +34,24 @@ resource "aws_cloudfront_origin_access_control" "site" {
 }
 
 data "aws_cloudfront_cache_policy" "optimized" { name = "Managed-CachingOptimized" }
+data "aws_cloudfront_cache_policy" "disabled" { name = "Managed-CachingDisabled" }
+data "aws_cloudfront_origin_request_policy" "all_viewer" { name = "Managed-AllViewerExceptHostHeader" }
+
+# SPA routing for the S3 origin only: paths without a file extension serve
+# index.html. (Distribution-wide custom error pages would also rewrite API errors.)
+resource "aws_cloudfront_function" "spa" {
+  name    = "${var.name}-spa"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-JS
+    function handler(event) {
+      var req = event.request;
+      var last = req.uri.split('/').pop();
+      if (last.indexOf('.') === -1) { req.uri = '/index.html'; }
+      return req;
+    }
+  JS
+}
 
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
@@ -36,6 +65,21 @@ resource "aws_cloudfront_distribution" "site" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
+  origin {
+    origin_id   = "api"
+    domain_name = var.api_origin_domain
+    custom_origin_config {
+      http_port              = var.api_origin_port
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = var.api_origin_secret
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "s3"
     viewer_protocol_policy = "redirect-to-https"
@@ -43,18 +87,23 @@ resource "aws_cloudfront_distribution" "site" {
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = data.aws_cloudfront_cache_policy.optimized.id
     compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa.arn
+    }
   }
 
-  # SPA routing: unknown paths serve index.html
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
+  # API: never cached, all methods, viewer headers/query/cookies forwarded.
+  ordered_cache_behavior {
+    path_pattern             = "/api/*"
+    target_origin_id         = "api"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    compress                 = true
   }
 
   restrictions {

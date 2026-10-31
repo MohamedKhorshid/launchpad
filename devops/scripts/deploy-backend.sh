@@ -30,32 +30,12 @@ aws s3 cp "$BIN" "s3://$BUCKET/$KEY" --only-show-errors
 aws s3 cp "$BIN" "s3://$BUCKET/backend/latest/server" --only-show-errors
 
 echo "==> Rolling out to $INSTANCE"
-CMD_ID="$(aws ssm send-command \
-  --instance-ids "$INSTANCE" \
-  --document-name AWS-RunShellScript \
-  --comment "deploy $VERSION" \
-  --parameters "commands=[\"/opt/app/deploy.sh $KEY\"]" \
-  --query Command.CommandId --output text)"
-
-# Wait for the command; the instance may still be booting on first deploy.
-for _ in $(seq 1 60); do
-  STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
-    --query Status --output text 2>/dev/null || echo Pending)"
-  case "$STATUS" in
-    Success) break ;;
-    Failed|Cancelled|TimedOut)
-      aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE" \
-        --query '[StandardOutputContent,StandardErrorContent]' --output text
-      echo "Deploy failed ($STATUS)" >&2; exit 1 ;;
-  esac
-  sleep 5
-done
-[ "${STATUS:-}" = "Success" ] || { echo "Timed out waiting for deploy" >&2; exit 1; }
+"$ROOT/devops/scripts/ssm-run.sh" "$INSTANCE" "/opt/app/deploy.sh $KEY" "deploy $VERSION"
 
 echo "==> Checking $API_URL/health"
 for _ in $(seq 1 12); do
   if curl -fsS "$API_URL/health"; then echo; echo "Backend $VERSION is live."; exit 0; fi
   sleep 5
 done
-echo "Deployed, but the public health check is failing. Check API Gateway logs." >&2
+echo "Deployed, but the public health check is failing (CloudFront -> Kong -> backend). Check the gateway logs: CloudWatch /<project>-<env>/gateway" >&2
 exit 1

@@ -13,7 +13,7 @@ a Go backend (modular monolith on one EC2 instance), and Terraform for AWS.
 | `devops/`  | Terraform + deploy scripts                    | `devops/CLAUDE.md`   |
 | `docs/`    | Product spec, design tokens, architecture     |                      |
 
-Request path: client -> API Gateway (HTTP API) -> VPC link -> Cloud Map -> EC2 :8080.
+Request path: client -> CloudFront `/api/*` -> Kong gateway (public EC2, `devops/gateway/kong.yml`) -> backend EC2 :8080 (private subnet).
 
 ## Commands (run from repo root)
 
@@ -23,7 +23,7 @@ Local (no AWS):
 
 AWS - **only through GitHub Actions** (these trigger a workflow and wait for it):
 - `make plan ENV=dev` - Terraform plan, nothing applied
-- `make deploy ENV=dev [COMPONENT=infra|backend|web]` - push first; `main` auto-deploys dev
+- `make deploy ENV=dev [COMPONENT=infra|gateway|backend|web]` - push first; `main` auto-deploys dev
 - `make status` / `make logs WF=deploy.yml` - inspect runs
 - Details and troubleshooting: `deploy` skill. Workflows: `.github/workflows/`.
 

@@ -1,0 +1,50 @@
+# Kong gateway config (DB-less, declarative). Deployed by
+#   make deploy ENV=dev COMPONENT=gateway   (also part of COMPONENT=all)
+# devops/scripts/deploy-gateway.sh fills in the ${...} values per environment,
+# validates the result with `kong config parse`, and applies it live (no restart).
+#
+# Request path: CloudFront /api/* -> Kong :8000 -> backend (private subnet).
+# Add routes, auth (jwt, key-auth), or other plugins here:
+#   https://developer.konghq.com/plugins/
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: backend
+    url: ${BACKEND_URL}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    retries: 1
+    routes:
+      - name: api
+        # /api/notes -> backend /notes
+        paths: ["/api/"]
+        strip_path: true
+        protocols: [http]
+        # Only CloudFront knows this value, so other CloudFront distributions
+        # can't use this gateway. Requests without it get 404 "no Route matched".
+        headers:
+          X-Origin-Verify: ["${ORIGIN_SECRET}"]
+    plugins:
+      - name: rate-limiting
+        config:
+          second: ${RATE_LIMIT_PER_SECOND}
+          minute: ${RATE_LIMIT_PER_MINUTE}
+          limit_by: ip
+          policy: local
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 10
+          size_unit: megabytes
+      - name: request-transformer
+        config:
+          remove:
+            headers: ["X-Origin-Verify"]
+
+plugins:
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true

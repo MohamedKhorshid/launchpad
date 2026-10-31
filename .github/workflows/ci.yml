@@ -57,3 +57,14 @@ jobs:
       - name: Validate bootstrap stack
         working-directory: devops/terraform/bootstrap
         run: terraform init -backend=false -input=false && terraform validate
+
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate Kong config
+        run: |
+          IMAGE="$(sed -n '/variable "kong_image"/,/}/s/.*default *= *"\(.*\)".*/\1/p' devops/terraform/app/variables.tf)"
+          export BACKEND_URL=http://10.0.10.10:8080 ORIGIN_SECRET=ci-placeholder RATE_LIMIT_PER_SECOND=20 RATE_LIMIT_PER_MINUTE=600
+          envsubst '$BACKEND_URL $ORIGIN_SECRET $RATE_LIMIT_PER_SECOND $RATE_LIMIT_PER_MINUTE' < devops/gateway/kong.yml > /tmp/kong.yml
+          docker run --rm -e KONG_DATABASE=off -v /tmp/kong.yml:/kong.yml:ro "$IMAGE" kong config parse /kong.yml

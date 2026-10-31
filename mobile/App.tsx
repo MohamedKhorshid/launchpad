@@ -13,7 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { api, type Note } from "./src/api";
 import { colors, radius, space } from "./src/theme";
 
-// Placeholder screen proving mobile -> API Gateway -> Go works end to end.
+// Placeholder screen proving mobile -> CloudFront -> Kong -> Go works end to end.
 // Replace it with your real app (consider Expo Router once you have several screens).
 export default function App() {
   return (

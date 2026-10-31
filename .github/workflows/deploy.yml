@@ -18,10 +18,14 @@ on:
       component:
         description: What to deploy
         type: choice
-        options: [all, infra, backend, web]
+        options: [all, infra, gateway, backend, web]
         default: all
       replace_backend_instance:
-        description: Recreate the EC2 instance (needed after changing its user data / env file)
+        description: Recreate the backend EC2 instance (needed after changing its user data / env file)
+        type: boolean
+        default: false
+      replace_gateway_instance:
+        description: Recreate the gateway EC2 instance (needed after changing its user data)
         type: boolean
         default: false
 
@@ -86,9 +90,16 @@ jobs:
         run: |
           EXTRA=""
           if [ "${{ inputs.replace_backend_instance }}" = "true" ]; then
-            EXTRA="-replace=module.backend.aws_instance.app"
+            EXTRA="$EXTRA -replace=module.backend.aws_instance.app"
+          fi
+          if [ "${{ inputs.replace_gateway_instance }}" = "true" ]; then
+            EXTRA="$EXTRA -replace=module.gateway.aws_instance.gateway"
           fi
           devops/scripts/tf.sh "$ENV" apply -auto-approve $EXTRA
+
+      - name: Gateway
+        if: env.COMPONENT == 'all' || env.COMPONENT == 'gateway' || inputs.replace_gateway_instance
+        run: devops/scripts/deploy-gateway.sh "$ENV"
 
       - name: Backend
         if: env.COMPONENT == 'all' || env.COMPONENT == 'backend' || inputs.replace_backend_instance

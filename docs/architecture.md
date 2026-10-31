@@ -1,19 +1,22 @@
 # Architecture
 
 ```
-                 ┌──────────────┐        ┌──────────────────────────┐
- Browser ───────▶│  CloudFront  │──OAC──▶│ S3 (React build)         │
-                 └──────────────┘        └──────────────────────────┘
- Browser / App ─▶ API Gateway (HTTP API, throttling, CORS, access logs)
-                      │ VPC link
-                      ▼
-                 Cloud Map service (SRV: private IP + port 8080)
-                      │
-            ┌─────────▼─────────── VPC (2 public subnets, no NAT) ┐
-            │  EC2 t4g (Amazon Linux 2023, arm64)                  │
-            │   systemd: /opt/app/server  (Go modular monolith)    │
-            │   SG: :8080 only from the VPC link SG; no SSH        │
-            └──────────────────────────────────────────────────────┘
+                                     ┌──────────────────────────────────┐
+ Browser / App ─HTTPS─▶ CloudFront ──┤ /*      ─OAC─▶ S3 (React build)  │
+                                     │ /api/*  ─HTTP :8000 + secret hdr ─┐
+                                     └──────────────────────────────────┘│
+ ┌──────────────────────── VPC ──────────────────────────────────────────▼─────┐
+ │ public subnet                                                               │
+ │   Kong gateway EC2 t4g.micro (Docker, DB-less, devops/gateway/kong.yml)     │
+ │     strips /api, rate limits per client IP, request ids, size limits        │
+ │     SG: :8000 from CloudFront origin-facing IPs only; also the NAT          │
+ │                         │ :8080                                             │
+ │ private subnet          ▼                                                   │
+ │   Backend EC2 t4g (Amazon Linux 2023, arm64), no public IP                  │
+ │     systemd: /opt/app/server (Go modular monolith)                          │
+ │     SG: :8080 from the gateway SG only; no SSH                              │
+ │     egress: via gateway NAT; S3 via free VPC gateway endpoint               │
+ └─────────────────────────────────────────────────────────────────────────────┘
  Deploys: GitHub Actions ─OIDC─▶ AWS role ─▶ Terraform + S3 artifacts + SSM RunCommand
 ```
 
@@ -22,19 +25,28 @@
 - **Modular monolith on one EC2**: one binary to build, run, debug and pay for.
   Modules have hard boundaries (no cross-imports of internals), so a module can
   be split into its own service later if it ever needs to scale independently.
-- **API Gateway in front**: public HTTPS endpoint, throttling, CORS, access
-  logs and (later) JWT auth without exposing the instance.
-- **VPC link + Cloud Map instead of a load balancer**: saves ~$18/month per
-  env. Swap in an ALB when you run more than one instance.
-- **No NAT gateway**: the instance has a public IP for outbound traffic but no
-  inbound rules except from the VPC link. Saves ~$35/month.
-- **SSM instead of SSH**: no keys, no open port 22; deploys run `deploy.sh`,
-  which health-checks and rolls back automatically.
+- **Public gateway, private backend**: the backend has no public IP and only
+  accepts the gateway, so the app is never directly exposed. All edge concerns
+  (rate limiting, auth, request ids, size limits) live in one place you control.
+- **Kong OSS (DB-less)**: declarative config in git, validated in CI, applied
+  live without restarts; a large plugin catalogue (JWT, key-auth, ACLs, ...)
+  when you need it. 3.9.x is the last Kong line published as open source.
+- **CloudFront in front of Kong**: free managed HTTPS on `*.cloudfront.net`,
+  no certificates or DNS to manage, and web + API share one origin (no CORS
+  for the web app). Kong only answers CloudFront (IP prefix list + a secret
+  `X-Origin-Verify` header that CloudFront adds and Kong requires).
+- **Gateway doubles as NAT**: the backend needs outbound access (SSM, third-party
+  APIs); a managed NAT gateway would cost ~$35/month. S3 goes through a free
+  gateway endpoint, so builds still download if the gateway is down.
+- **SSM instead of SSH**: no keys, no open port 22; deploys run `deploy.sh`
+  on each instance (backend: health check + auto rollback; gateway: config
+  applied through Kong's admin API, rejected configs keep the old one).
 - **Terraform state in S3 with native locking** (`use_lockfile`), one state file per environment.
 
 ## Scaling path
 
 1. Bigger instance (`instance_type` in `env/<env>.tfvars`).
 2. Database off the box (`add-database` skill).
-3. ALB + Auto Scaling group with 2+ instances; point the API integration at the ALB listener.
-4. Extract a hot module into its own service.
+3. ALB + Auto Scaling group with 2+ backend instances; point the Kong `backend` service at the ALB.
+4. Managed NAT gateway (and a second gateway instance) when egress must be highly available.
+5. Extract a hot module into its own service; add it as another Kong service/route.

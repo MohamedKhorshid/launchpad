@@ -1,0 +1,120 @@
+#!/bin/bash
+# First-boot setup for the Kong gateway on Amazon Linux 2023.
+set -euo pipefail
+
+# ---------- NAT for the private subnet ----------
+echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/90-gateway-nat.conf
+sysctl --system >/dev/null
+
+dnf install -y docker nftables
+
+cat > /usr/local/sbin/gateway-nat <<'NAT'
+#!/bin/bash
+set -euo pipefail
+IF="$(ip -4 route show default | awk '{print $5; exit}')"
+nft -f - <<RULES
+table ip gateway_nat
+delete table ip gateway_nat
+table ip gateway_nat {
+  chain postrouting {
+    type nat hook postrouting priority srcnat; policy accept;
+    ip saddr ${private_cidr} oifname "$IF" masquerade
+  }
+}
+RULES
+NAT
+chmod 0755 /usr/local/sbin/gateway-nat
+
+cat > /etc/systemd/system/gateway-nat.service <<'UNIT'
+[Unit]
+Description=NAT for the private subnet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/gateway-nat
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# ---------- Docker (host networking only; leave forwarding/firewall to us) ----------
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'JSON'
+{ "iptables": false, "ip-forward": false }
+JSON
+
+systemctl daemon-reload
+systemctl enable --now gateway-nat docker
+
+# ---------- Kong (DB-less) ----------
+mkdir -p /etc/kong /opt/gateway
+# Start with an empty config; CI pushes devops/gateway/kong.yml right after.
+if ! aws s3 cp "s3://${bucket}/gateway/latest/kong.yml" /etc/kong/kong.yml; then
+  echo '_format_version: "3.0"' > /etc/kong/kong.yml
+fi
+chmod 0644 /etc/kong/kong.yml
+
+cat > /etc/systemd/system/kong.service <<'UNIT'
+[Unit]
+Description=Kong API gateway (DB-less, Docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f kong
+ExecStartPre=/usr/bin/docker pull ${kong_image}
+ExecStart=/usr/bin/docker run --rm --name kong --network host \
+  --log-driver awslogs \
+  --log-opt awslogs-region=${region} \
+  --log-opt awslogs-group=${log_group} \
+  --log-opt awslogs-stream=kong \
+  -v /etc/kong:/kong:ro \
+  -e KONG_DATABASE=off \
+  -e KONG_DECLARATIVE_CONFIG=/kong/kong.yml \
+  -e KONG_PROXY_LISTEN=0.0.0.0:${proxy_port} \
+  -e KONG_ADMIN_LISTEN=127.0.0.1:8001 \
+  -e KONG_PROXY_ACCESS_LOG=/dev/stdout \
+  -e KONG_PROXY_ERROR_LOG=/dev/stderr \
+  -e KONG_ADMIN_ACCESS_LOG=off \
+  -e KONG_ADMIN_ERROR_LOG=/dev/stderr \
+  -e KONG_TRUSTED_IPS=0.0.0.0/0,::/0 \
+  -e KONG_REAL_IP_HEADER=X-Forwarded-For \
+  -e KONG_REAL_IP_RECURSIVE=on \
+  -e KONG_HEADERS=off \
+  -e KONG_NGINX_WORKER_PROCESSES=2 \
+  -e KONG_MEM_CACHE_SIZE=64m \
+  ${kong_image}
+ExecStop=/usr/bin/docker stop kong
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Called by CI through SSM: deploy.sh <s3 key of rendered kong.yml>
+# Applies the config live through the local admin API (validated by Kong; the
+# running config is kept if it is rejected), then persists it for restarts.
+cat > /opt/gateway/deploy.sh <<'DEPLOY'
+#!/bin/bash
+set -euo pipefail
+KEY="$1"
+aws s3 cp "s3://${bucket}/$KEY" /tmp/kong.yml.new --only-show-errors
+for i in $(seq 1 60); do
+  curl -fsS http://127.0.0.1:8001/status >/dev/null 2>&1 && break
+  [ "$i" = 60 ] && { echo "Kong admin API not up"; journalctl -u kong -n 50 --no-pager || true; exit 1; }
+  sleep 3
+done
+CODE="$(curl -sS -o /tmp/kong-config.out -w '%%{http_code}' -X POST http://127.0.0.1:8001/config -F config=@/tmp/kong.yml.new)"
+case "$CODE" in
+  2*) install -m 0644 /tmp/kong.yml.new /etc/kong/kong.yml; echo "gateway config applied" ;;
+  *) cat /tmp/kong-config.out; echo; echo "gateway config rejected (HTTP $CODE); previous config still active"; exit 1 ;;
+esac
+DEPLOY
+chmod 0755 /opt/gateway/deploy.sh
+
+systemctl daemon-reload
+systemctl enable --now kong

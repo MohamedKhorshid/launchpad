@@ -8,7 +8,7 @@ trigger workflows; nothing touches AWS from your laptop.
 ```
 web/       React + Vite + TypeScript         -> S3 + CloudFront
 mobile/    React Native (Expo)               -> EAS Build -> App Store / Google Play
-backend/   Go modular monolith               -> one EC2 instance behind API Gateway
+backend/   Go modular monolith               -> private EC2 behind a Kong gateway (CloudFront /api/*)
 devops/    Terraform + CI deploy scripts     -> any AWS account you choose
 .github/   CI, Setup, Deploy, Plan, Destroy, Mobile release workflows
 .claude/   Claude Code skills + permissions  -> /kickoff, /design-to-code, /deploy, ...

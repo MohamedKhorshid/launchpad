@@ -24,8 +24,9 @@ Never run `devops/scripts/*`, `terraform apply`, or `aws` commands locally.
 |------|---------|
 | Preview infra changes | `make plan ENV=dev` |
 | Deploy everything to dev | `make deploy ENV=dev` (also happens automatically on push to `main`) |
-| Deploy one part | `make deploy ENV=dev COMPONENT=backend` (`infra`, `backend`, `web`) |
-| Recreate the EC2 instance (user data changed) | `scripts/run-workflow.sh deploy.yml -f env=dev -f component=infra -f replace_backend_instance=true` |
+| Deploy one part | `make deploy ENV=dev COMPONENT=backend` (`infra`, `gateway`, `backend`, `web`) |
+| Recreate the backend instance (user data changed) | `scripts/run-workflow.sh deploy.yml -f env=dev -f component=infra -f replace_backend_instance=true` |
+| Recreate the gateway instance (its user data changed) | `scripts/run-workflow.sh deploy.yml -f env=dev -f component=infra -f replace_gateway_instance=true` |
 | Deploy to prod | `make deploy ENV=prod`: only when the user explicitly asks; runs from `main`; may wait for a reviewer in the GitHub `prod` environment |
 | Check runs / logs | `make status`, `gh run view <id> --log-failed` |
 
@@ -53,7 +54,11 @@ Read the failed step's log (printed by `run-workflow.sh`), then:
 | Backend: SSM never runs | First boot still in progress or SSM agent not registered; re-run `COMPONENT=backend` after 3 min |
 | Backend: health check failed | App crashes on start; `deploy.sh` already rolled back. Reproduce with `make dev`, fix, redeploy |
 | Infrastructure: `Your account must be verified before you can add new CloudFront resources` | AWS account restriction, not a code bug. The user must open an AWS Support case (Account and billing) asking to verify the account / enable CloudFront. Don't change Terraform. Once AWS confirms, `make deploy ENV=dev`: Terraform resumes from what was already created |
-| API returns 503 | VPC link / Cloud Map not ready (first deploy ~5 min) or app down |
+| Gateway: `config rejected` | `devops/gateway/kong.yml` is invalid; the old config stays live. Fix the YAML/plugin config (CI `gateway` job reproduces it), push, redeploy `COMPONENT=gateway` |
+| Gateway: SSM never runs / admin API not up | Gateway still booting (Docker + Kong pull, ~3 min on first deploy); re-run `COMPONENT=gateway` |
+| API returns 502/504 from CloudFront | Kong unreachable (gateway booting or down) or backend down; check CloudWatch `/<project>-<env>/gateway` |
+| API returns 404 `no Route matched` | Request skipped CloudFront (missing `X-Origin-Verify`) or the path lacks the `/api/` prefix |
+| API returns 429 | Kong rate limit hit; tune `api_rate_limit_per_*` in `env/<env>.tfvars`, deploy `infra` then `gateway` |
 | CORS errors | Origin missing from `extra_cors_origins`; edit tfvars, deploy `infra` |
 | Stuck waiting | `prod` environment needs reviewer approval in GitHub |
 

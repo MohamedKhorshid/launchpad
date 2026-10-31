@@ -38,7 +38,7 @@ mobile: ## Start Expo pointed at your local backend
 # ---------- AWS: everything runs in GitHub Actions ----------
 # Push your commits first; workflows build what is on GitHub.
 
-deploy: ## Deploy via Actions: make deploy ENV=dev COMPONENT=all|infra|backend|web
+deploy: ## Deploy via Actions: make deploy ENV=dev COMPONENT=all|infra|gateway|backend|web
 	$(RUN) deploy.yml -f env=$(ENV) -f component=$(COMPONENT)
 
 plan: ## Terraform plan via Actions (no changes applied): make plan ENV=dev

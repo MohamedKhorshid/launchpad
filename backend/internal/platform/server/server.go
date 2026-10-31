@@ -90,7 +90,8 @@ func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// cors is mostly for local development; in AWS, API Gateway handles CORS.
+// cors serves extra origins (e.g. local dev against a deployed API). The web app
+// itself shares CloudFront's origin with the API, so it needs no CORS.
 func cors(origins []string, next http.Handler) http.Handler {
 	allowAll := slices.Contains(origins, "*")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

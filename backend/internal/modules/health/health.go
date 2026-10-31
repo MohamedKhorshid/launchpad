@@ -1,4 +1,4 @@
-// Package health exposes liveness for API Gateway checks and deploy verification.
+// Package health exposes liveness for gateway checks and deploy verification.
 package health
 
 import (

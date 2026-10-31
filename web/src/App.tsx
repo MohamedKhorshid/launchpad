@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type Note } from "./api";
 
-// Placeholder screen proving web -> API Gateway -> Go works end to end.
+// Placeholder screen proving web -> CloudFront -> Kong -> Go works end to end.
 // Replace it with your real app (see .claude/skills/design-to-code).
 export function App() {
   const [notes, setNotes] = useState<Note[]>([]);
