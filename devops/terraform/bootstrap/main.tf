@@ -29,6 +29,18 @@ variable "github_repo" {
   description = "owner/name of the GitHub repo allowed to deploy"
 }
 
+variable "github_repo_id" {
+  type        = string
+  default     = ""
+  description = "Numeric repo id (github.repository_id); needed for immutable OIDC subjects"
+}
+
+variable "github_owner_id" {
+  type        = string
+  default     = ""
+  description = "Numeric owner id (github.repository_owner_id); needed for immutable OIDC subjects"
+}
+
 variable "create_oidc_provider" {
   type        = bool
   default     = true
@@ -41,6 +53,17 @@ locals {
   account_id   = data.aws_caller_identity.me.account_id
   github_oidc  = "token.actions.githubusercontent.com"
   provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : "arn:aws:iam::${local.account_id}:oidc-provider/${local.github_oidc}"
+
+  # GitHub signs the token subject either as repo:owner/name:... (classic) or,
+  # with immutable subjects (newer repos/orgs), as repo:owner@<id>/name@<id>:...
+  # Trust both so setup works whichever format the repo uses.
+  repo_owner = split("/", var.github_repo)[0]
+  repo_name  = split("/", var.github_repo)[1]
+
+  github_subjects = concat(
+    ["repo:${var.github_repo}:*"],
+    var.github_repo_id != "" && var.github_owner_id != "" ? ["repo:${local.repo_owner}@${var.github_owner_id}/${local.repo_name}@${var.github_repo_id}:*"] : []
+  )
 }
 
 # ---------- Terraform state ----------
@@ -91,7 +114,7 @@ data "aws_iam_policy_document" "github_trust" {
     condition {
       test     = "StringLike"
       variable = "${local.github_oidc}:sub"
-      values   = ["repo:${var.github_repo}:*"]
+      values   = local.github_subjects
     }
   }
 }

@@ -48,7 +48,7 @@ Read the failed step's log (printed by `run-workflow.sh`), then:
 | Failed step / symptom | Likely cause / fix |
 |-----------------------|--------------------|
 | `preflight` skipped everything | Repo not set up: user runs `make setup` |
-| Configure AWS credentials | Role trust doesn't match this repo (repo renamed/transferred): re-run setup |
+| Configure AWS credentials (`Not authorized to perform sts:AssumeRoleWithWebIdentity`) | Role trust doesn't match this repo's OIDC subject (repo renamed/transferred, or created before the immutable-subject fix): ask the user to run `make setup` and answer `y` to repair |
 | Infrastructure | Read the Terraform error; fix HCL, push, redeploy. State lock: another run is active; wait |
 | Backend: SSM never runs | First boot still in progress or SSM agent not registered; re-run `COMPONENT=backend` after 3 min |
 | Backend: health check failed | App crashes on start; `deploy.sh` already rolled back. Reproduce with `make dev`, fix, redeploy |

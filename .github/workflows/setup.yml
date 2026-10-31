@@ -92,7 +92,9 @@ jobs:
           terraform init -input=false
           terraform apply -input=false -auto-approve \
             -var="project=$PROJECT" -var="region=$REGION" \
-            -var="github_repo=${{ github.repository }}" -var="create_oidc_provider=$CREATE_OIDC"
+            -var="github_repo=${{ github.repository }}" \
+            -var="github_repo_id=${{ github.repository_id }}" -var="github_owner_id=${{ github.repository_owner_id }}" \
+            -var="create_oidc_provider=$CREATE_OIDC"
 
           aws s3 cp terraform.tfstate "s3://$BUCKET/bootstrap/terraform.tfstate" --only-show-errors
 

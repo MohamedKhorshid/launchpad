@@ -3,6 +3,13 @@
 Friction found while building real products from this template. Newest first.
 Claude appends here via the `template-feedback` skill.
 
+## 2026-10-31 - First dev deploy: OIDC role refused (immutable subject claims)
+- **Stage:** setup, deploy
+- **What happened:** Setup succeeded, but Deploy failed at `Configure AWS credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. The repo uses GitHub's immutable OIDC subjects, so the token `sub` is `repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:dev`; the deploy role only trusted `repo:<owner>/<repo>:*`.
+- **Workaround:** None (fixed in the template instead).
+- **Template fix:** Done. The bootstrap trust policy accepts both subject formats (Setup passes `github.repository_id` / `github.repository_owner_id`). `make setup` on an already-connected repo now offers a repair run that reuses `devops/project.env` and re-applies the role.
+- **Severity:** blocker (fixed)
+
 ## 2026-10-31 - First CI run failed: terraform fmt + Expo versions
 - **Stage:** infra, mobile
 - **What happened:** CI failed on `terraform fmt -check` (misaligned `=` in the `module "api"` block of `devops/terraform/app/main.tf`) and on `npx expo install --check` (`react-native-safe-area-context` was `^5.11.0`; SDK 58 wants `~5.10.1`).

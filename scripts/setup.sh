@@ -19,9 +19,17 @@ command -v gh  >/dev/null || die "Install the GitHub CLI: https://cli.github.com
 command -v git >/dev/null || die "Install git"
 gh auth status >/dev/null 2>&1 || die "Run: gh auth login"
 
+git pull -q --rebase 2>/dev/null || true   # pick up project.env if setup ran elsewhere
+
+REPAIR=false
 if [ -f devops/project.env ]; then
-  echo "Already set up (devops/project.env exists). To redeploy: make deploy ENV=dev"
-  exit 0
+  echo "This repo is already connected to AWS (devops/project.env exists)."
+  echo "Re-running setup repairs the connection (e.g. deploys fail at 'Configure AWS"
+  echo "credentials') and keeps the same project, region and AWS resources."
+  case "$(ask "Repair the AWS connection? (y/N)" "N")" in
+    y|Y|yes) REPAIR=true ;;
+    *) echo "  Nothing to do. To redeploy: make deploy ENV=dev"; exit 0 ;;
+  esac
 fi
 
 bold "1/4  GitHub repo"
@@ -32,12 +40,21 @@ git push -q origin HEAD 2>/dev/null || true
 echo "  $REPO"
 
 bold "2/4  Project identity"
-OWNER="$(echo "${REPO%%/*}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
-NAME_DEFAULT="$(echo "${REPO##*/}" | tr '[:upper:]_ ' '[:lower:]--' | tr -cd 'a-z0-9-')"
-PROJECT="$(ask "Project slug (AWS resource names)" "$NAME_DEFAULT")"
-DISPLAY="$(ask "App display name" "$(echo "$PROJECT" | perl -pe 's/(^|-)(\w)/ \u$2/g; s/^ //')")"
-BUNDLE="$(ask "iOS bundle id / Android package" "com.$OWNER.$(echo "$PROJECT" | tr -d '-')")"
-REGION="$(ask "AWS region" "${AWS_REGION:-us-east-1}")"
+if $REPAIR; then
+  # shellcheck disable=SC1091
+  PROJECT="$(. devops/project.env && echo "$PROJECT")"
+  REGION="$(. devops/project.env && echo "$AWS_REGION")"
+  DISPLAY="$PROJECT"   # unused on repair: the template was already renamed
+  BUNDLE="$(perl -ne 'print $1 and exit if /"bundleIdentifier":\s*"([^"]+)"/' mobile/app.json)"
+  echo "  $PROJECT in $REGION (from devops/project.env)"
+else
+  OWNER="$(echo "${REPO%%/*}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+  NAME_DEFAULT="$(echo "${REPO##*/}" | tr '[:upper:]_ ' '[:lower:]--' | tr -cd 'a-z0-9-')"
+  PROJECT="$(ask "Project slug (AWS resource names)" "$NAME_DEFAULT")"
+  DISPLAY="$(ask "App display name" "$(echo "$PROJECT" | perl -pe 's/(^|-)(\w)/ \u$2/g; s/^ //')")"
+  BUNDLE="$(ask "iOS bundle id / Android package" "com.$OWNER.$(echo "$PROJECT" | tr -d '-')")"
+  REGION="$(ask "AWS region" "${AWS_REGION:-us-east-1}")"
+fi
 
 bold "3/4  AWS credentials (one-time, deleted right after setup)"
 put_secret() { printf '%s' "$2" | gh secret set "$1" --repo "$REPO" >/dev/null; }

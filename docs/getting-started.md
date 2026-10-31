@@ -43,6 +43,10 @@ Prefer clicking? Add `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and
 `AWS_SESSION_TOKEN`) in repo Settings → Secrets → Actions, run **Setup (one-time)**
 from the Actions tab, then delete the secrets.
 
+Deploys fail at **Configure AWS credentials**? Run `make setup` again and answer
+`y` to repair: it reuses your project and region, re-applies the deploy role,
+and starts a fresh dev deploy. Your AWS resources stay as they are.
+
 ## 4. Protect prod
 
 Repo Settings → Environments → `prod` → add yourself as a **required reviewer**.
