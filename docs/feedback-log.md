@@ -3,6 +3,13 @@
 Friction found while building real products from this template. Newest first.
 Claude appends here via the `template-feedback` skill.
 
+## 2026-10-31 - First dev deploy: CloudFront blocked on a new AWS account
+- **Stage:** infra
+- **What happened:** `tf apply` created network, IAM, S3, Cloud Map and the VPC link, then failed on `aws_cloudfront_distribution.site`: `AccessDenied: Your account must be verified before you can add new CloudFront resources`. AWS applies this hold to many new accounts.
+- **Workaround:** Open an AWS Support case (Account and billing) to verify the account; then redeploy (Terraform resumes).
+- **Template fix:** Done (docs). Warned about in getting-started step 3 and the README, and the deploy skill recognizes the error. It can't be fixed in code.
+- **Severity:** blocker for new accounts (external)
+
 ## 2026-10-31 - First dev deploy: Terraform "Invalid for_each argument"
 - **Stage:** infra
 - **What happened:** After OIDC worked, the first `tf apply` failed in `modules/backend`: `for_each = toset(var.allowed_from)` was fed the VPC link security group id, which is unknown until apply, so Terraform could not compute the keys. `terraform validate` passes; only a real first plan hits it.

@@ -24,6 +24,14 @@ cd my-idea
 
 ## 3. Connect an AWS account (one time)
 
+> **Brand-new AWS account?** AWS blocks CloudFront (used for the web app) on
+> many new accounts until they are verified, and the first deploy then fails
+> with `Your account must be verified before you can add new CloudFront
+> resources`. Before you start, open a free case in the
+> [AWS Support Center](https://console.aws.amazon.com/support/home#/case/create)
+> (Account and billing → "Request CloudFront access / account verification").
+> It usually takes from a few hours to a day.
+
 ```bash
 make setup
 ```

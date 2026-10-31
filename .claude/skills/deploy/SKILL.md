@@ -52,6 +52,7 @@ Read the failed step's log (printed by `run-workflow.sh`), then:
 | Infrastructure | Read the Terraform error; fix HCL, push, redeploy. State lock: another run is active; wait |
 | Backend: SSM never runs | First boot still in progress or SSM agent not registered; re-run `COMPONENT=backend` after 3 min |
 | Backend: health check failed | App crashes on start; `deploy.sh` already rolled back. Reproduce with `make dev`, fix, redeploy |
+| Infrastructure: `Your account must be verified before you can add new CloudFront resources` | AWS account restriction, not a code bug. The user must open an AWS Support case (Account and billing) asking to verify the account / enable CloudFront. Don't change Terraform. Once AWS confirms, `make deploy ENV=dev`: Terraform resumes from what was already created |
 | API returns 503 | VPC link / Cloud Map not ready (first deploy ~5 min) or app down |
 | CORS errors | Origin missing from `extra_cors_origins`; edit tfvars, deploy `infra` |
 | Stuck waiting | `prod` environment needs reviewer approval in GitHub |

@@ -48,7 +48,7 @@ to the `prod` environment in GitHub.
 | For | Account / tool |
 |-----|----------------|
 | Everything | GitHub (`gh auth login`), Go 1.24+, Node 22+ |
-| Deploys | An AWS account (admin credentials only once, for setup) |
+| Deploys | An AWS account (admin credentials only once, for setup). New accounts: ask AWS Support to enable CloudFront first ([why](docs/getting-started.md#3-connect-an-aws-account-one-time)) |
 | Mobile builds | Expo account (free) |
 | Store publishing | Apple Developer ($99/yr), Google Play Console ($25 once) |
 
